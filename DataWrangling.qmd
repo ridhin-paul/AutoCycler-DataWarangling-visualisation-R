@@ -1,0 +1,264 @@
+---
+title: "Data wrangling for sensor outputs"
+format: 
+  html:
+    embed-resources: true
+engine: knitr
+---
+
+\***Note:** I have enabled warnings so as to double check the result and is expected, refer README.md for more details on warnings.
+
+**Just for quick visualisation of variables**
+
+Use it to debug and for quick visualisation set *eval:false* unless you want to render it (further data cleaning can be employed if necessary (for ex: dealing with outliers))
+
+
+**Loading required packages**
+
+```{r}
+#|warning: true
+#|message: true
+#|eval: true
+library(tidyverse)
+library(fs)
+library(reticulate) #Library used to embed python code if required
+```
+
+**Choosing the date of experiment**
+
+```{r}
+#|message: true
+#|eval: true 
+#|warning: true
+
+#Below enter the date of the data
+enter_Date <- "27-02-24"
+folder_Path <- paste0("data/", enter_Date)
+```
+
+**Reading all the sensor logs**
+
+```{r}
+#|message: true
+#|eval: true 
+#|warning: true
+
+#Takes in temp, humidity & flow log as text and replaces every unprintable character with ""
+file_content_1 <- readLines(dir_ls(folder_Path, regexp = "Flow")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+#Takes in temp reading (from PID)
+file_content_2 <- readLines(dir_ls(folder_Path, regexp = "Regelung")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+#Takes in vaisala_in sensor log
+file_content_3 <- readLines(dir_ls(folder_Path, regexp = "In")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+ #Takes in vaisala_out sensor log
+file_content_4 <- readLines(dir_ls(folder_Path, regexp = "Out")) %>% 
+  str_replace_all("[^[:print:]]", "")
+```
+
+
+**Log from temperature, humidity and flow sensor**
+
+```{r}
+#|message : false
+#|eval: true
+#|warning: false
+
+line_filter_1 <- grep("^\\s*temp\\(C\\):\\d+\\.\\d+ humidity\\(%\\):\\d+\\.\\d+ flow\\(L/m\\):\\d+$",
+                      file_content_1,
+                      value = TRUE)
+
+file_content_1_data <- line_filter_1 %>%
+  str_extract_all("temp\\(C\\):\\d+\\.\\d+|humidity\\(%\\):\\d+\\.\\d+|flow\\(L/m\\):\\d+") %>% 
+   map(~str_extract_all(., "\\d+\\.\\d+|\\d+") %>% 
+        unlist() %>% 
+        as.numeric())
+
+sensor_1_df <- do.call(rbind, file_content_1_data) %>%
+  as.data.frame() %>%
+  setNames(c("temperature(C)", "humidity(%)", "flow(L\\m)"))
+
+temp_hum_flow <- as_tibble(sensor_1_df)
+```
+
+**Various plots of log from temperature, humidity and flow sensor**
+
+```{r}
+#|message : false
+#|eval: true
+ggplot(temp_hum_flow,aes(x=`temperature(C)`)) +
+  geom_histogram(bins=30)
+
+ggplot(temp_hum_flow,aes(x = 1:nrow(temp_hum_flow), y=`temperature(C)`)) +
+  geom_line() +
+  labs(x = "index", y="temperature (C)")
+
+ggplot(temp_hum_flow,aes(x=`humidity(%)`)) +
+  geom_histogram(bins=30)
+
+ggplot(temp_hum_flow,aes(x = 1:nrow(temp_hum_flow),y=`humidity(%)`)) +
+  geom_line() +
+  labs(x = "index", y = "humidity (%)")
+
+ggplot(temp_hum_flow,aes(x=`flow(L\\m)`)) +
+  geom_histogram(bins=30)
+
+temp_hum_flow |>
+  filter(`flow(L\\m)`<100)|>
+  mutate(index = row_number()) |>
+  ggplot(aes(x=index,y=`flow(L\\m)`)) +
+  geom_line() +
+  labs(x = "index", y="flow (L\\m)")
+```
+
+
+**Log from Air-T and Probe-T sensor (PID)**
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+line_filter_2 <- grep("^Air-T = -?\\d+\\.\\d+ C  ;  Duty_AIR = -?\\d+\\.\\d+ %  ;  Probe-T = \\d+\\.\\d+ C  ;  Duty_PROBE = -?\\d+\\.\\d+ %$",
+                      file_content_2,
+                      value = TRUE)
+
+file_content_2_data <- line_filter_2 %>% 
+  str_extract_all("^Air-T = -?\\d+\\.\\d+ C  ;  Duty_AIR = -?\\d+\\.\\d+ %  ;  Probe-T = \\d+\\.\\d+ C  ;  Duty_PROBE = -?\\d+\\.\\d+ %$") %>%
+  map(~str_extract_all(., "\\d+\\.\\d+") %>%
+        unlist() %>%
+        as.numeric())
+
+sensor_2_df <- do.call(rbind, file_content_2_data) %>%
+  as.data.frame() %>%
+  setNames(c("Air-T(C)", "Duty_Air", "Probe-T(C)", "Duty_Probe")) 
+
+AirT_ProbeT <- as_tibble(sensor_2_df) |>
+  select(`Air-T(C)`, `Probe-T(C)`)
+
+```
+
+**Plot of air and probe temperature**
+The code below can filter out extreme temperature reading
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+AirT_ProbeT |>
+   #filter(`Air-T(C)` <60 & `Air-T(C)`>0 & `Probe-T(C)` <60 & `Probe-T(C)`>0) |>
+    mutate(index = row_number()) |>
+    ggplot() +
+    geom_line(aes(x = index, y=`Air-T(C)`)) +
+    geom_line(aes(x = index, y=`Probe-T(C)`), color = "blue") +
+    labs(x = "index", y="Temp(C)")
+```
+
+**Log from vaisala_in sensor**
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+
+line_filter_3 <- grep("(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})",file_content_3, value = TRUE)
+
+#The below code matches the first entry and outputs a matrix using this bcz it was found easier to deal with string in time format unlike the above cases which where numerical values; I am unaware of implementing 'and' operator with regex.
+matches <- str_match(line_filter_3,  "(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})") 
+
+sensor_3_df <- data.frame("CO2" = as.numeric(matches[, 2]), "Time" = matches[, 3])
+vaisala_in <- as_tibble(sensor_3_df) |>
+    mutate(`Time` = hms(`Time`), seconds = hour(`Time`) * 3600 + minute(`Time`) * 60 + second(`Time`),
+           elapsed_Time = as.numeric(difftime(seconds, first(seconds)),units = "mins")) 
+```
+
+**Log from vaisala_out sensor**
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+
+line_filter_4 <- grep("(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})",file_content_4, value = TRUE)
+matches <- str_match(line_filter_4,  "(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})") 
+
+sensor_4_df <- data.frame("CO2" = as.numeric(matches[, 2]), "Time" = matches[, 3])
+vaisala_out <- as_tibble(sensor_4_df) |>
+  mutate(`Time` = hms(`Time`), seconds = hour(`Time`) * 3600 + minute(`Time`) * 60 + second(`Time`),
+         elapsed_Time = as.numeric(difftime(seconds, first(seconds)),units = "mins")) 
+```
+
+**Plot of vaisala sensors**
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+
+vaisala_out |>
+  #filter(CO2 <400) |>
+  ggplot() +
+  geom_line(aes(x=elapsed_Time, y=`CO2`)) +
+  labs(x = "time (mins)", y="Vaisala_in CO_2 (PPM)")
+
+vaisala_in |>
+  #filter(CO2 <400) |>
+  ggplot() +
+  geom_line(aes(x=elapsed_Time, y=`CO2`)) +
+  labs(x = "time (mins)", y="Vaisala_out CO_2 (PPM)")
+```
+
+**Averaging consecutive 60 values for a smoother plot**
+
+```{r}
+average_60_rows <- function(data) {
+  data |>
+    mutate(group = ceiling(row_number() / 60)) |>
+    group_by(group) |>
+    summarise(
+      x = mean(elapsed_Time, na.rm = TRUE),  #
+      y = mean(CO2, na.rm = TRUE)
+    ) |>
+     select(-group)
+}
+
+new_tibble1 <- average_60_rows(vaisala_in)
+new_tibble2 <- average_60_rows(vaisala_out)
+
+new_tibble1 |>
+  ggplot() +
+  geom_line(aes(x=x, y=y)) +
+  labs(x = "time (mins)", y="Vaisala_in CO_2 (PPM)")
+
+new_tibble2 |>
+  ggplot() +
+  geom_line(aes(x=x, y=y)) +
+  labs(x = "time (mins)", y="Vaisala_out CO_2 (PPM)")
+```
+
+**Trims out the excess observation at the end; this assumes the experiment started and ran synchronously for both sensors.**
+
+```{r}
+# min_obs = min(nrow(new_tibble1), nrow(new_tibble2))
+# 
+# trimmed_tibble_air_in <-
+#   new_tibble1 |>
+#   slice(1:min_obs)
+# 
+# trimmed_tibble_air_out <-
+#   new_tibble2 |>
+#   slice(1:min_obs)
+# 
+# CO2_absorbed <- as_tibble(abs(trimmed_tibble_air_out$y - trimmed_tibble_air_in$y)) |>
+#   mutate(Time = trimmed_tibble_air_out$x) |>
+#   rename(absorbed_CO_2 = value)
+# 
+# 
+# ggplot(CO2_absorbed) +
+#   geom_line(aes(x= Time, y=absorbed_CO_2)) + 
+#   labs(x = "time (mins)", y= "absorbed CO_2 (PPM)" )
+
+```

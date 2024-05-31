@@ -1,0 +1,174 @@
+---
+title: "Data visualisation of autocycler output"
+format:
+  revealjs:
+    transition: slide
+    title-slide-attributes: 
+      data-background-image: template.jpg
+    self-contained: true
+---
+
+```{r}
+library(tidyverse)
+library(fs)
+library(reticulate) #Library used to embed python code if required
+```
+
+```{r}
+#Below enter the date of the data
+enter_Date <- "22-02-24"
+folder_path <- paste0("data/", enter_Date)
+```
+
+```{r}
+file_content_1 <- readLines(dir_ls(folder_path, regexp = "Flow")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+file_content_2 <- readLines(dir_ls(folder_path, regexp = "Regelung")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+file_content_3 <- readLines(dir_ls(folder_path, regexp = "In")) %>% 
+  str_replace_all("[^[:print:]]", "")
+
+file_content_4 <- readLines(dir_ls(folder_path, regexp = "Out")) %>% 
+  str_replace_all("[^[:print:]]", "")
+```
+
+```{r}
+line_filter_1 <- grep("temp\\(C\\):\\d+\\.\\d+ humidity\\(%\\):\\d+\\.\\d+ flow\\(L/m\\):\\d+",
+                      file_content_1,
+                      value = TRUE)
+
+file_content_1_data <- line_filter_1 %>%
+  str_extract_all("^\\s*temp\\(C\\):\\d+\\.\\d+ humidity\\(%\\):\\d+\\.\\d+ flow\\(L/m\\):\\d+$") %>% 
+   map(~str_extract_all(., "\\d+\\.\\d+|\\d+") %>% 
+        unlist() %>% 
+        as.numeric())
+
+sensor_1_df <- do.call(rbind, file_content_1_data) %>%
+  as.data.frame() %>%
+  setNames(c("temperature(C)", "humidity(%)", "flow(L\\m)"))
+
+temp_hum_flow <- as_tibble(sensor_1_df)
+
+line_filter_2 <- grep("^Air-T = -?\\d+\\.\\d+ C  ;  Duty_AIR = -?\\d+\\.\\d+ %  ;  Probe-T = \\d+\\.\\d+ C  ;  Duty_PROBE = -?\\d+\\.\\d+ %$",
+                      file_content_2,
+                      value = TRUE)
+
+file_content_2_data <- line_filter_2 %>% 
+  str_extract_all("^Air-T = -?\\d+\\.\\d+ C  ;  Duty_AIR = -?\\d+\\.\\d+ %  ;  Probe-T = \\d+\\.\\d+ C  ;  Duty_PROBE = -?\\d+\\.\\d+ %$") %>%
+  map(~str_extract_all(., "\\d+\\.\\d+") %>%
+        unlist() %>%
+        as.numeric())
+
+sensor_2_df <- do.call(rbind, file_content_2_data) %>%
+  as.data.frame() %>%
+  setNames(c("Air-T(C)", "Duty_Air", "Probe-T(C)", "Duty_Probe")) 
+
+AirT_ProbeT <- as_tibble(sensor_2_df) |>
+  select(`Air-T(C)`, `Probe-T(C)`)
+
+line_filter_3 <- grep("(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})",file_content_3, value = TRUE)
+
+#The below code only matches the first entry and outputs a matrix using this bcz it was found easier to deal with string in time format unlike the above cases which where numerical values; I am unaware of implementing 'and' operator with regex.
+matches <- str_match(line_filter_3,  "(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})") 
+
+sensor_3_df <- data.frame("CO2" = as.numeric(matches[, 2]), "Time" = matches[, 3])
+vaisala_in <- as_tibble(sensor_3_df) |>
+    mutate(`Time` = hms(`Time`), seconds = hour(`Time`) * 3600 + minute(`Time`) * 60 + second(`Time`),
+           elapsed_Time = as.numeric(difftime(seconds, first(seconds)),units = "mins")) 
+
+line_filter_4 <- grep("(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})",file_content_4, value = TRUE)
+matches <- str_match(line_filter_4,  "(\\d+\\.\\d+)\\sppm\\s(\\d+:\\d{2}:\\d{2})") 
+
+sensor_4_df <- data.frame("CO2" = as.numeric(matches[, 2]), "Time" = matches[, 3])
+vaisala_out <- as_tibble(sensor_4_df) |>
+  mutate(`Time` = hms(`Time`), seconds = hour(`Time`) * 3600 + minute(`Time`) * 60 + second(`Time`),
+         elapsed_Time = as.numeric(difftime(seconds, first(seconds)),units = "mins")) 
+```
+
+
+::: {align=center}
+# Evaluation of air contact experiment done on 27-02-2024 {background-image=template.jpg} 
+:::
+
+## Sensor output of air flow {background-image=template.jpg} 
+
+```{r}
+average_60_rows <- function(data) {
+  data |>
+    mutate(group = ceiling(row_number() / 60)) |>
+    group_by(group) |>
+    summarise(
+      y = mean(`flow(L\\m)`, na.rm = TRUE)
+    ) |>
+     select(-group)
+}
+
+flowAvg <- average_60_rows(temp_hum_flow)
+
+flowAvg |>
+  mutate(index = row_number()) |>
+  filter(y<15) |>
+  ggplot(aes(x=index,y=y)) +
+  geom_line() +
+  labs(x = "index", y="flow (L\\m)")+
+  theme_minimal()
+```
+
+## Sensor output of input air temperature {background-image=template.jpg} 
+
+```{r}
+temp_hum_flow |>
+  ggplot(aes(x = 1:nrow(temp_hum_flow), y=`temperature(C)`)) +
+    geom_line() +
+    labs(x = "index", y="temperature (C)") + theme_minimal()
+```
+
+## Sensor output of air and probe temperature {background-image=template.jpg}
+
+```{r}
+AirT_ProbeT |>
+    filter(`Air-T(C)` <60 & `Air-T(C)`>0 & `Probe-T(C)` <60 & `Probe-T(C)`>0) |>
+    mutate(index = row_number()) |>
+    ggplot() +
+    geom_line(aes(x = index, y=`Air-T(C)`, color = "Air-temp")) +
+    geom_line(aes(x = index, y=`Probe-T(C)`, color = "Probe-temp")) +
+    labs(x = "index", y="temperature (C)", color = "Temperature") + 
+    theme_minimal()
+```
+
+## Sensor output of $CO_2$ <br> concentration {background-image=template.jpg}
+
+```{r}
+average_60_rows <- function(data) {
+  data |>
+    mutate(group = ceiling(row_number() / 60)) |>
+    group_by(group) |>
+    summarise(
+      x = mean(elapsed_Time, na.rm = TRUE),  #
+      y = mean(CO2, na.rm = TRUE)
+    ) |>
+     select(-group)
+}
+
+new_tibble1 <- average_60_rows(vaisala_in)
+new_tibble2 <- average_60_rows(vaisala_out)
+
+min_obs = min(nrow(new_tibble1), nrow(new_tibble2))
+
+trimmed_tibble_air_in <-
+  new_tibble1 |>
+  slice(1:min_obs)
+
+trimmed_tibble_air_out <-
+  new_tibble2 |>
+  slice(1:min_obs)
+
+ggplot() +
+  geom_line(trimmed_tibble_air_in, mapping = aes(x, y=y, color = "supply air")) +
+  geom_line(trimmed_tibble_air_out, mapping = aes(x=x, y=y, color = "exhaust air")) +
+  labs(x = "time (mins)", y= "CO_2 concentration (ppm)")
+```
+
+
