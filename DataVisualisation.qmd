@@ -87,12 +87,11 @@ vaisala_out <- as_tibble(sensor_4_df) |>
          elapsed_Time = as.numeric(difftime(seconds, first(seconds)),units = "mins")) 
 ```
 
-
-::: {align=center}
-# Evaluation of air contact experiment done on 27-02-2024 {background-image=template.jpg} 
+::: {align="center"}
+# Evaluation of air contact experiment done on 27-02-2024 {background-image="template.jpg"}
 :::
 
-## Sensor output of air flow {background-image=template.jpg} 
+## Sensor output of air flow {background-image="template.jpg"}
 
 ```{r}
 average_60_rows <- function(data) {
@@ -116,7 +115,7 @@ flowAvg |>
   theme_minimal()
 ```
 
-## Sensor output of input air temperature {background-image=template.jpg} 
+## Sensor output of input air temperature {background-image="template.jpg"}
 
 ```{r}
 temp_hum_flow |>
@@ -125,7 +124,7 @@ temp_hum_flow |>
     labs(x = "index", y="temperature (C)") + theme_minimal()
 ```
 
-## Sensor output of air and probe temperature {background-image=template.jpg}
+## Sensor output of air and probe temperature {background-image="template.jpg"}
 
 ```{r}
 AirT_ProbeT |>
@@ -138,7 +137,7 @@ AirT_ProbeT |>
     theme_minimal()
 ```
 
-## Sensor output of $CO_2$ <br> concentration {background-image=template.jpg}
+## Sensor output of $CO_2$ <br> concentration {background-image="template.jpg"}
 
 ```{r}
 average_60_rows <- function(data) {
@@ -170,5 +169,3 @@ ggplot() +
   geom_line(trimmed_tibble_air_out, mapping = aes(x=x, y=y, color = "exhaust air")) +
   labs(x = "time (mins)", y= "CO_2 concentration (ppm)")
 ```
-
-
