@@ -31,7 +31,7 @@ library(reticulate) #Library used to embed python code if required
 #|warning: true
 
 #Below enter the date of the data
-enter_Date <- "22-02-24"
+enter_Date <- "27-02-24"
 folder_Path <- paste0("data/", enter_Date)
 ```
 
@@ -150,9 +150,9 @@ AirT_ProbeT |>
    #filter(`Air-T(C)` <60 & `Air-T(C)`>0 & `Probe-T(C)` <60 & `Probe-T(C)`>0) |>
     mutate(index = row_number()) |>
     ggplot() +
-    geom_line(aes(x = index, y=`Air-T(C)`)) +
-    geom_line(aes(x = index, y=`Probe-T(C)`), color = "blue") +
-    labs(x = "index", y="Temp(C)")
+    geom_line(aes(x = index, y=`Air-T(C)`, color = "Air-T")) +
+    geom_line(aes(x = index, y=`Probe-T(C)`, color = "Probe-T")) +
+    labs(x = "index", y="Temp(C)",color = "Temperature") 
 ```
 
 **Log from vaisala_in sensor**
@@ -196,13 +196,13 @@ vaisala_out <- as_tibble(sensor_4_df) |>
 #|eval: true
 #|warning : false
 
-vaisala_out |>
+vaisala_in |>
   #filter(CO2 <400) |>
   ggplot() +
   geom_line(aes(x=elapsed_Time, y=`CO2`)) +
   labs(x = "time (mins)", y="Vaisala_in CO_2 (PPM)")
 
-vaisala_in |>
+vaisala_out |>
   #filter(CO2 <400) |>
   ggplot() +
   geom_line(aes(x=elapsed_Time, y=`CO2`)) +
@@ -245,7 +245,61 @@ vaisala_out_60 |>
 #|message : false
 #|eval: true
 #|warning : false
-min_obs = min(nrow(vaisala_in_60), nrow(vaisala_out_60), nrow(temp_hum_flow))
+
+average_60_rows <- function(data) {
+  data |>
+    mutate(group = ceiling(row_number() / 60)) |>
+    group_by(group) |>
+    summarise(
+      x = mean(elapsed_Time, na.rm = TRUE),  #
+      y = mean(CO2, na.rm = TRUE)
+    ) |>
+     select(-group)
+}
+
+vaisala_in_60 <- average_60_rows(vaisala_in)
+vaisala_out_60 <- average_60_rows(vaisala_out)
+
+min_obs = min(nrow(vaisala_in_60), nrow(vaisala_out_60))
+
+trimmed_tibble_air_in <-
+  vaisala_in_60 |>
+  slice(1:min_obs)
+
+trimmed_tibble_air_out <-
+  vaisala_out_60 |>
+  slice(1:min_obs)
+
+ggplot() +
+  geom_line(trimmed_tibble_air_in, mapping = aes(x, y=y, color = "supply air")) +
+  geom_line(trimmed_tibble_air_out, mapping = aes(x=x, y=y, color = "exhaust air")) +
+  labs(x = "time (mins)", y= "CO_2 concentration (ppm)")
+```
+
+## Calculation of $CO_2$ absorbed 
+
+```{r}
+#|message : false
+#|eval: true
+#|warning : false
+
+temp_hum_flow_filtered <- temp_hum_flow |>
+  filter(`flow(L\\m)` < 100)
+
+average_60_rows <- function(data, col_name) {
+  data |>
+    mutate(group = ceiling(row_number() / 60)) |>
+    group_by(group) |>
+    summarise(
+      flow = mean(col_name, na.rm = TRUE)
+    ) |>
+     select(-group)
+}
+
+flow_60 <- average_60_rows(temp_hum_flow_filtered, temp_hum_flow_filtered$`flow(L\\m)`)
+
+
+min_obs = min(nrow(vaisala_in_60), nrow(vaisala_out_60), nrow(flow_60))
 
 density_CO_2 <- 1.784
 
@@ -257,9 +311,11 @@ trimmed_tibble_air_out <-
   vaisala_out_60 |>
   slice(1:min_obs)
 
-trimmed_temp_air_humid <-
-  temp_hum_flow |>
-  slice(1:min_obs)
+trimmed_flow <-
+  flow_60 |>
+  slice(1:min_obs) 
+
+trimmed_flow_mean <- mean(trimmed_flow$flow)
 
 m <- 0
 mt <- numeric()
@@ -268,7 +324,7 @@ for (i in 1:(min_obs - 1))
   {
   m <- m + (1 / 60000000) * density_CO_2 * abs((trimmed_tibble_air_in$y[i] -  
                                         trimmed_tibble_air_out$y[i])) *
-    trimmed_temp_air_humid$`flow(L\\m)`[i] *
+    trimmed_flow_mean *
     (trimmed_tibble_air_out$x[i + 1] - trimmed_tibble_air_out$x[i])
   mt <- c(mt, m)
 }
@@ -281,5 +337,4 @@ CO2_absorbed <- as_tibble(mt) |>
 ggplot() +
   geom_line(data = CO2_absorbed, aes(x= elapsed_time, y=absorbed_CO_2)) +
   labs(x = "time (mins)", y= "absorbed CO_2" )
-
 ```
